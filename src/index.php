@@ -7,4 +7,7 @@ if ($zmienna1 === 'test') {
 } else {
     echo "Zmienna ma inną wartość.";
 }
+
+// 11
+
 //test main
