@@ -2,40 +2,28 @@ name: PHPStan
 
 on:
   push:
-    branches: ['**']
+    branches:
+      - '**'   # każdy branch
   pull_request:
-    branches: ['**']
+    branches:
+      - '**'
 
 jobs:
   phpstan:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Debug workspace
-        run: |
-          echo "Repo: $GITHUB_REPOSITORY"
-          echo "Branch/Ref: $GITHUB_REF"
-          echo "Commit SHA: $GITHUB_SHA"
-          echo "Workspace: $GITHUB_WORKSPACE"
-          ls -la
-          echo "--- Searching for composer.json ---"
-          find . -maxdepth 3 -name composer.json -print
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          tools: composer
           coverage: none
-          extensions: intl, mbstring, pdo_mysql, xml
+          tools: composer
 
-      - name: Install dependencies
+      - name: Install deps
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+      - name: PHPStan
+        run: ./vendor/bin/phpstan analyse --no-progress
