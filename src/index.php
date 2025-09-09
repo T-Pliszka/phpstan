@@ -8,6 +8,8 @@ if ($zmienna1 === 'test') {
     echo "Zmienna ma inną wartość.";
 }
 
+$t = $zmienna1 . $zmienna2;
+
 // 11
 
 //test main
