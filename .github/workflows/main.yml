@@ -38,13 +38,14 @@ jobs:
 
       - name: Run PHPStan
         id: stan
-        continue-on-error: true
         shell: bash
+        continue-on-error: true
         run: |
           echo "Uruchamiam PHPStan na katalogu: src"
-          set -o pipefail
           ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
-          echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          code=${PIPESTATUS[0]}
+          echo "Exit code was: $code"
+          echo "exitcode=$code" >> $GITHUB_OUTPUT
 
       - name: Debug exitcode
         run: echo "PHPStan exitcode=${{ steps.stan.outputs.exitcode }}"
