@@ -29,7 +29,6 @@ jobs:
       - name: Debug workspace and paths
         run: |
           echo "pwd: $(pwd)"
-          echo "--- ls -la (root) ---"
           ls -la
           echo "--- find composer.json ---"
           find . -maxdepth 2 -name composer.json -print
@@ -46,6 +45,9 @@ jobs:
           set -o pipefail
           ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Debug exitcode
+        run: echo "PHPStan exitcode=${{ steps.stan.outputs.exitcode }}"
 
       - name: Upload PHPStan report (artifact)
         if: steps.stan.outputs.exitcode != '0'
