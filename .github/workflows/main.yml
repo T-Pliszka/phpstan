@@ -1,12 +1,8 @@
-name: PHPStan
+name: PHPStan (main push -> create issue on fail)
 
 on:
   push:
-    branches:
-      - '**'
-  pull_request:
-    branches:
-      - '**'
+    branches: ['main']
 
 permissions:
   contents: read
@@ -15,6 +11,7 @@ permissions:
 jobs:
   phpstan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,13 +28,12 @@ jobs:
 
       - name: Debug workspace and paths
         run: |
-          echo "Obecny katalog roboczy:"
-          pwd
-          echo "--- Zawartość katalogu głównego ---"
+          echo "pwd: $(pwd)"
+          echo "--- ls -la (root) ---"
           ls -la
-          echo "--- Szukam composer.json ---"
+          echo "--- find composer.json ---"
           find . -maxdepth 2 -name composer.json -print
-          echo "--- Szukam katalogów kodu ---"
+          echo "--- ls src / app ---"
           ls -la src || echo "Brak katalogu src"
           ls -la app || echo "Brak katalogu app"
 
@@ -47,8 +43,8 @@ jobs:
         shell: bash
         run: |
           echo "Uruchamiam PHPStan na katalogu: src"
-          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src \
-            | tee phpstan-report.txt
+          set -o pipefail
+          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload PHPStan report (artifact)
@@ -61,8 +57,11 @@ jobs:
       - name: Create Issue on PHPStan failure
         if: steps.stan.outputs.exitcode != '0'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "== gh auth status =="
+          gh auth status || true
+
           head -n 80 phpstan-report.txt > phpstan-issue-snippet.txt
           {
             echo "Commit: ${{ github.sha }}";
@@ -76,6 +75,7 @@ jobs:
             echo;
             echo "Full report is attached as an artifact.";
           } > issue_body.txt
+
           gh issue create \
             --title "PHPStan errors in commit ${{ github.sha }}" \
             --body-file issue_body.txt \
