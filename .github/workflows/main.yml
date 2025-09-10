@@ -8,6 +8,10 @@ on:
     branches:
       - '**'
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   phpstan:
     runs-on: ubuntu-latest
@@ -40,29 +44,42 @@ jobs:
       - name: Run PHPStan
         id: stan
         continue-on-error: true
+        shell: bash
         run: |
           echo "Uruchamiam PHPStan na katalogu: src"
-          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
+          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src \
+            | tee phpstan-report.txt
           echo "exitcode=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload PHPStan report (artifact)
-        if: steps.stan.outcome == 'failure'
+        if: steps.stan.outputs.exitcode != '0'
         uses: actions/upload-artifact@v4
         with:
           name: phpstan-report
           path: phpstan-report.txt
 
       - name: Create Issue on PHPStan failure
-        if: steps.stan.outcome == 'failure'
+        if: steps.stan.outputs.exitcode != '0'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           head -n 80 phpstan-report.txt > phpstan-issue-snippet.txt
-          echo -e "Commit: ${{ github.sha }}\n\nWorkflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\n\nErrors (first lines):\n\`\`\`\n$(cat phpstan-issue-snippet.txt)\n\`\`\`\n\nFull report is attached as an artifact." > issue_body.txt
+          {
+            echo "Commit: ${{ github.sha }}";
+            echo;
+            echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
+            echo;
+            echo "Errors (first lines):";
+            echo '```';
+            cat phpstan-issue-snippet.txt;
+            echo '```';
+            echo;
+            echo "Full report is attached as an artifact.";
+          } > issue_body.txt
           gh issue create \
             --title "PHPStan errors in commit ${{ github.sha }}" \
             --body-file issue_body.txt \
             --label "phpstan-error"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Fail job if PHPStan failed
         if: steps.stan.outputs.exitcode != '0'
