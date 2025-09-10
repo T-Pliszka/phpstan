@@ -108,3 +108,6 @@ echo UNDEFINED_CONST;
 
 // 11
 // test main
+
+
+$test();
