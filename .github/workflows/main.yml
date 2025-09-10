@@ -29,6 +29,7 @@ jobs:
       - name: Debug workspace and paths
         run: |
           echo "pwd: $(pwd)"
+          echo "--- ls -la (root) ---"
           ls -la
           echo "--- find composer.json ---"
           find . -maxdepth 2 -name composer.json -print
@@ -41,11 +42,13 @@ jobs:
         shell: bash
         continue-on-error: true
         run: |
+          set +e
           echo "Uruchamiam PHPStan na katalogu: src"
           ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
           code=${PIPESTATUS[0]}
-          echo "Exit code was: $code"
-          echo "exitcode=$code" >> $GITHUB_OUTPUT
+          echo "Captured PHPStan exit code: $code"
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          set -e
 
       - name: Debug exitcode
         run: echo "PHPStan exitcode=${{ steps.stan.outputs.exitcode }}"
