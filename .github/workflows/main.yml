@@ -34,10 +34,10 @@ jobs:
           echo "--- Szukam composer.json ---"
           find . -maxdepth 2 -name composer.json -print
           echo "--- Szukam katalogów kodu ---"
-          ls -la src || echo "Brak katalogu src"
+          ls -la /src || echo "Brak katalogu /src"
           ls -la app || echo "Brak katalogu app"
 
       - name: Run PHPStan
         run: |
-          echo "Uruchamiam PHPStan na katalogu: src"
-          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src
+          echo "Uruchamiam PHPStan na katalogu: /src"
+          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G /src
