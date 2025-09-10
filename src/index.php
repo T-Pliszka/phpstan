@@ -10,6 +10,9 @@ if ($zmienna1 === 'test') {
 
 $t = $zmienna1 . $zmienna2;
 
+$test = 5 / 0;
+
+$test = 5 / $zmienna3;
 // 11
 
 //test main
