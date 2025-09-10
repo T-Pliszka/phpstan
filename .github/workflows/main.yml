@@ -3,7 +3,7 @@ name: PHPStan
 on:
   push:
     branches:
-      - '**'   # każdy branch
+      - '**'
   pull_request:
     branches:
       - '**'
@@ -25,6 +25,19 @@ jobs:
       - name: Install deps
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src
+      - name: Debug workspace and paths
+        run: |
+          echo "Obecny katalog roboczy:"
+          pwd
+          echo "--- Zawartość katalogu głównego ---"
+          ls -la
+          echo "--- Szukam composer.json ---"
+          find . -maxdepth 2 -name composer.json -print
+          echo "--- Szukam katalogów kodu ---"
+          ls -la src || echo "Brak katalogu src"
+          ls -la app || echo "Brak katalogu app"
 
+      - name: Run PHPStan
+        run: |
+          echo "Uruchamiam PHPStan na katalogu: src"
+          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src
