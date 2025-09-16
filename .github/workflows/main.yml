@@ -1,4 +1,4 @@
-name: PHPStan (every 15min or manual, blame, dedupe issues, inline report)
+name: PHPStan (every 15min or manual, blame, dedupe issues, single truncated body)
 
 on:
   schedule:
@@ -40,7 +40,7 @@ jobs:
           echo "exitcode=$code" >> "$GITHUB_OUTPUT"
           set -e
 
-      - name: Build annotated report with git blame (inline only, no artifacts)
+      - name: Build annotated report with git blame (inline, single/truncated)
         if: steps.stan.outputs.exitcode != '0'
         env:
           WORKROOT: ${{ github.workspace }}
@@ -49,7 +49,7 @@ jobs:
             echo "jq not found"; exit 1
           fi
 
-          # Wyciągnij (plik, linia, wiadomość) z raportu PHPStan
+          # Wyciągnij płaską listę (plik, linia, wiadomość)
           jq -r '
             .files
             | to_entries[]
@@ -60,22 +60,28 @@ jobs:
             | @tsv
           ' phpstan-report.json > phpstan-flat.tsv || true
 
-          # Zbuduj raport z blame; ścieżki na względne (czytelniejsze w issue)
           : > phpstan-annotated.txt
           if [ -s phpstan-flat.tsv ]; then
             while IFS=$'\t' read -r file line msg; do
+              # Ścieżki względne dla czytelności
               relfile="${file#${WORKROOT}/}"
               relfile="${relfile#./}"
               [ -z "$relfile" ] && relfile="$file"
+              # Jeśli plik względny nie istnieje, spróbuj oryginalnej ścieżki
+              [ ! -f "$relfile" ] && [ -f "$file" ] && relfile="$file"
 
               if [ "$line" -gt 0 ] 2>/dev/null; then
                 blame=$(git blame -L ${line},${line} --porcelain -- "$relfile" 2>/dev/null || true)
                 author=$(echo "$blame" | awk '/^author /{sub(/^author /,""); print; exit}')
                 commitsha=$(echo "$blame" | awk '/^commit /{print $2; exit}')
-                summary=$(echo "$blame" | awk '/^summary /{sub(/^summary /,""); print; exit}')
+                # Temat commita przez git show (bardziej niezawodne niż "summary")
+                summary=""
+                if [ -n "$commitsha" ]; then
+                  summary=$(git show -s --format=%s "$commitsha" 2>/dev/null || true)
+                fi
                 [ -z "$author" ] && author="(nieznany autor)"
                 [ -z "$commitsha" ] && commitsha="(brak SHA)"
-                [ -z "$summary" ] && summary="(no summary)"
+                [ -z "$summary" ] && summary="(no subject)"
                 echo "${relfile}:${line} [${author}] ${msg}  -- ${summary} (${commitsha})" >> phpstan-annotated.txt
               else
                 echo "${relfile}:${line} [brak dokładnej linii] ${msg}" >> phpstan-annotated.txt
@@ -86,28 +92,34 @@ jobs:
             head -n 200 phpstan-report.json >> phpstan-annotated.txt
           fi
 
-          # Wersja skrócona na początek issue
-          head -n 80 phpstan-annotated.txt > phpstan-issue-snippet.txt
-
-          # Zbuduj główne body (zawiera krótki snippet)
+          # Krótkie intro do treści (link do runa + nagłówek)
           {
             echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
             echo;
-            echo "Errors (annotated, first lines):";
-            echo '```';
-            cat phpstan-issue-snippet.txt;
-            echo '```';
-            echo;
-            echo "> Poniżej pełny raport (może być podzielony na kilka komentarzy, jeśli bardzo duży).";
-          } > issue_body.txt
+            echo "Errors (annotated):"
+            echo
+          } > header.txt
 
-          # Przygotuj pełną zawartość do wklejenia w komentarze / body
-          # Opakuj w blok kodu, żeby było czytelnie
-          {
-            echo '```';
-            cat phpstan-annotated.txt
-            echo '```';
-          } > full_body.txt
+          # Zbuduj JEDEN tekst do wstawienia (issue body lub pojedynczy komentarz), ucinany jeśli za duży
+          # Limit bezpieczny ~55k bajtów
+          MAX=55000
+          # Ile bajtów zajmie header + code fences + info o ucięciu
+          OVERHEAD=1000
+          PAYLOAD=$((MAX - OVERHEAD))
+          total=$(wc -c < phpstan-annotated.txt | tr -d ' ')
+
+          : > final_body.txt
+          cat header.txt >> final_body.txt
+          echo '```' >> final_body.txt
+          if [ "$total" -le "$PAYLOAD" ]; then
+            cat phpstan-annotated.txt >> final_body.txt
+            echo '```' >> final_body.txt
+          else
+            head -c $PAYLOAD phpstan-annotated.txt >> final_body.txt
+            echo >> final_body.txt
+            echo '... [TRUNCATED] (report shortened to fit issue/comment size limit)' >> final_body.txt
+            echo '```' >> final_body.txt
+          fi
 
       - name: Check for existing open PHPStan issue
         if: steps.stan.outputs.exitcode != '0'
@@ -119,52 +131,26 @@ jobs:
           count=$(gh issue list --state open --label "phpstan-error" --limit 100 --json number --jq 'length')
           echo "open_count=$count" >> "$GITHUB_OUTPUT"
 
-      - name: Create or comment (inline full report, chunked if needed)
-        if: steps.stan.outputs.exitcode != '0'
+      - name: Create new issue with single truncated body
+        if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count == '0'
+        id: create_issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # limit GitHub issue/komentarz ~64k; przyjmijmy bezpieczne 55k
-          MAX=55000
-          size=$(wc -c < full_body.txt | tr -d ' ')
-          echo "Full body size: $size bytes"
+          num=$(gh issue create \
+            --title "PHPStan errors (scheduled/manual run)" \
+            --label "phpstan-error" \
+            --body-file final_body.txt \
+            --json number --jq .number)
+          echo "issue_number=$num" >> "$GITHUB_OUTPUT"
 
-          if [ "${{ steps.dup.outputs.open_count }}" = "0" ]; then
-            # Utwórz nowe issue z krótkim body
-            num=$(gh issue create \
-              --title "PHPStan errors (scheduled/manual run)" \
-              --label "phpstan-error" \
-              --body-file issue_body.txt \
-              --json number --jq .number)
-            echo "issue_number=$num" >> "$GITHUB_OUTPUT"
-
-            # Dołącz pełny raport (jako jeden komentarz albo w kawałkach)
-            if [ "$size" -le "$MAX" ]; then
-              gh issue comment "$num" --body-file full_body.txt
-            else
-              split -b ${MAX} -d -a 2 full_body.txt chunk_
-              for f in chunk_*; do
-                gh issue comment "$num" --body-file "$f"
-              done
-            fi
-          else
-            # Komentuj na istniejącym
-            num=$(gh issue list --state open --label "phpstan-error" --limit 1 --json number --jq '.[0].number')
-            echo "issue_number=$num" >> "$GITHUB_OUTPUT"
-
-            # Najpierw dodaj krótki nagłówek z linkiem do runa
-            gh issue comment "$num" --body-file issue_body.txt
-
-            # Potem pełny raport (1 komentarz lub chunkowane)
-            if [ "$size" -le "$MAX" ]; then
-              gh issue comment "$num" --body-file full_body.txt
-            else
-              split -b ${MAX} -d -a 2 full_body.txt chunk_
-              for f in chunk_*; do
-                gh issue comment "$num" --body-file "$f"
-              done
-            fi
-          fi
+      - name: Comment once (single truncated body) on existing issue
+        if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          num=$(gh issue list --state open --label "phpstan-error" --limit 1 --json number --jq '.[0].number')
+          gh issue comment "$num" --body-file final_body.txt
 
       - name: Close open PHPStan issues (if any)
         if: steps.stan.outputs.exitcode == '0'
