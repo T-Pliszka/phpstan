@@ -1,8 +1,9 @@
-name: PHPStan (daily 7:55 -> create issue on fail)
+name: PHPStan (daily 7:55 or manual, dedupe issues)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '55 7 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -53,21 +54,9 @@ jobs:
       - name: Debug exitcode
         run: echo "PHPStan exitcode=${{ steps.stan.outputs.exitcode }}"
 
-      - name: Upload PHPStan report (artifact)
+      - name: Prepare issue body
         if: steps.stan.outputs.exitcode != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: phpstan-report
-          path: phpstan-report.txt
-
-      - name: Create Issue on PHPStan failure
-        if: steps.stan.outputs.exitcode != '0'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "== gh auth status =="
-          gh auth status || true
-
           head -n 80 phpstan-report.txt > phpstan-issue-snippet.txt
           {
             echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
@@ -80,10 +69,61 @@ jobs:
             echo "Full report is attached as an artifact.";
           } > issue_body.txt
 
+      - name: Upload PHPStan report (artifact)
+        if: steps.stan.outputs.exitcode != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phpstan-report
+          path: phpstan-report.txt
+
+      # --- Anty-duplikacja: sprawdź, czy istnieje otwarty issue z etykietą phpstan-error
+      - name: Check for existing open PHPStan issue
+        if: steps.stan.outputs.exitcode != '0'
+        id: dup
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          count=$(gh issue list --state open --label "phpstan-error" --limit 100 --json number --jq 'length')
+          echo "Znaleziono otwartych issue phpstan-error: $count"
+          echo "open_count=$count" >> "$GITHUB_OUTPUT"
+
+      # Jeśli nie ma otwartych -> utwórz nowe
+      - name: Create Issue on PHPStan failure
+        if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
           gh issue create \
-            --title "PHPStan errors (scheduled run)" \
+            --title "PHPStan errors (scheduled/manual run)" \
             --body-file issue_body.txt \
             --label "phpstan-error"
+
+      # Jeśli jest otwarte -> dodaj komentarz do pierwszego znalezionego
+      - name: Comment on existing PHPStan issue
+        if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          num=$(gh issue list --state open --label "phpstan-error" --limit 1 --json number --jq '.[0].number')
+          echo "Dodaję komentarz do istniejącego issue #$num"
+          gh issue comment "$num" --body-file issue_body.txt
+
+      # Gdy PHPStan przejdzie: zamknij ewentualne otwarte issue phpstan-error
+      - name: Close open PHPStan issues (if any)
+        if: steps.stan.outputs.exitcode == '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nums=$(gh issue list --state open --label "phpstan-error" --limit 100 --json number --jq '.[].number')
+          if [ -n "$nums" ]; then
+            for n in $nums; do
+              echo "Zamykam issue #$n (PHPStan green)"
+              gh issue close "$n" -c "PHPStan green on workflow run ${{ github.run_id }}"
+            done
+          else
+            echo "Brak otwartych issue do zamknięcia."
+          fi
 
       - name: Fail job if PHPStan failed
         if: steps.stan.outputs.exitcode != '0'
