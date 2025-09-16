@@ -1,4 +1,4 @@
-name: PHPStan (daily 7:55 or manual, dedupe issues)
+name: PHPStan (every 15min or manual, blame, dedupe issues)
 
 on:
   schedule:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # pełna historia dla git blame
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -38,14 +40,14 @@ jobs:
           ls -la src || echo "Brak katalogu src"
           ls -la app || echo "Brak katalogu app"
 
-      - name: Run PHPStan
+      - name: Run PHPStan (JSON output)
         id: stan
         shell: bash
         continue-on-error: true
         run: |
           set +e
           echo "Uruchamiam PHPStan na katalogu: src"
-          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G src | tee phpstan-report.txt
+          ./vendor/bin/phpstan analyse --no-progress --memory-limit=1G --error-format=json src | tee phpstan-report.json
           code=${PIPESTATUS[0]}
           echo "Captured PHPStan exit code: $code"
           echo "exitcode=$code" >> "$GITHUB_OUTPUT"
@@ -54,29 +56,71 @@ jobs:
       - name: Debug exitcode
         run: echo "PHPStan exitcode=${{ steps.stan.outputs.exitcode }}"
 
-      - name: Prepare issue body
+      - name: Build annotated report with git blame
         if: steps.stan.outputs.exitcode != '0'
         run: |
-          head -n 80 phpstan-report.txt > phpstan-issue-snippet.txt
+          # Upewnij się, że mamy jq
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found"; exit 1
+          fi
+
+          # Wyciągnij (plik, linia, wiadomość) z raportu PHPStan (różne wersje mają nieco inne pola)
+          # Schemat: .files | {"<path>": { "messages": [ { "line": N, "message": "..." }, ... ] } }
+          jq -r '
+            .files
+            | to_entries[]
+            | .key as $file
+            | (.value.messages // [])
+            | .[]
+            | [$file, (.line // 0), (.message // "")]
+            | @tsv
+          ' phpstan-report.json > phpstan-flat.tsv || true
+
+          # Jeśli nic nie wypluło (nieoczekiwane), to zakończ z info
+          if [ ! -s phpstan-flat.tsv ]; then
+            echo "Brak szczegółowych wiadomości w JSON, generuję skrót z całego pliku." > phpstan-annotated.txt
+            head -n 200 phpstan-report.json >> phpstan-annotated.txt
+          else
+            : > phpstan-annotated.txt
+            while IFS=$'\t' read -r file line msg; do
+              if [ "$line" -gt 0 ] 2>/dev/null; then
+                author=$(git blame -L ${line},${line} --porcelain -- "$file" | awk '/^author /{sub(/^author /,""); print; exit}')
+                commit=$(git blame -L ${line},${line} --porcelain -- "$file" | awk '/^summary /{sub(/^summary /,""); s=$0} /^commit /{c=$2} END{printf "%s (%s)", s, c}')
+                [ -z "$author" ] && author="(nieznany autor)"
+                [ -z "$commit" ] && commit="(brak commit info)"
+                echo "${file}:${line} [${author}] ${msg}  -- ${commit}" >> phpstan-annotated.txt
+              else
+                echo "${file}:${line} [brak dokładnej linii] ${msg}" >> phpstan-annotated.txt
+              fi
+            done < phpstan-flat.tsv
+          fi
+
+          # Przygotuj snippet do issue (pierwsze 80 linii)
+          head -n 80 phpstan-annotated.txt > phpstan-issue-snippet.txt
+
+          # Złóż body do issue / komentarza
           {
             echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
             echo;
-            echo "Errors (first lines):";
+            echo "Errors (annotated, first lines):";
             echo '```';
             cat phpstan-issue-snippet.txt;
             echo '```';
             echo;
-            echo "Full report is attached as an artifact.";
+            echo "Załączniki:";
+            echo "- phpstan-annotated.txt (pełna lista z autorami linii)";
+            echo "- phpstan-report.json (surowy JSON z PHPStan)";
           } > issue_body.txt
 
-      - name: Upload PHPStan report (artifact)
+      - name: Upload artifacts (annotated + raw)
         if: steps.stan.outputs.exitcode != '0'
         uses: actions/upload-artifact@v4
         with:
-          name: phpstan-report
-          path: phpstan-report.txt
+          name: phpstan-artifacts
+          path: |
+            phpstan-annotated.txt
+            phpstan-report.json
 
-      # --- Anty-duplikacja: sprawdź, czy istnieje otwarty issue z etykietą phpstan-error
       - name: Check for existing open PHPStan issue
         if: steps.stan.outputs.exitcode != '0'
         id: dup
@@ -88,7 +132,6 @@ jobs:
           echo "Znaleziono otwartych issue phpstan-error: $count"
           echo "open_count=$count" >> "$GITHUB_OUTPUT"
 
-      # Jeśli nie ma otwartych -> utwórz nowe
       - name: Create Issue on PHPStan failure
         if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count == '0'
         env:
@@ -99,7 +142,6 @@ jobs:
             --body-file issue_body.txt \
             --label "phpstan-error"
 
-      # Jeśli jest otwarte -> dodaj komentarz do pierwszego znalezionego
       - name: Comment on existing PHPStan issue
         if: steps.stan.outputs.exitcode != '0' && steps.dup.outputs.open_count != '0'
         env:
@@ -109,7 +151,6 @@ jobs:
           echo "Dodaję komentarz do istniejącego issue #$num"
           gh issue comment "$num" --body-file issue_body.txt
 
-      # Gdy PHPStan przejdzie: zamknij ewentualne otwarte issue phpstan-error
       - name: Close open PHPStan issues (if any)
         if: steps.stan.outputs.exitcode == '0'
         env:
