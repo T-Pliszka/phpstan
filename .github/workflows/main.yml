@@ -2,7 +2,7 @@ name: PHPStan (every 15min or manual, blame, dedupe issues, single truncated bod
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '55 6 * * *'
   workflow_dispatch:
 
 permissions:
