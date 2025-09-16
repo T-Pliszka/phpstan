@@ -1,8 +1,8 @@
-name: PHPStan (main push -> create issue on fail)
+name: PHPStan (daily 7:55 -> create issue on fail)
 
 on:
-  push:
-    branches: ['main']
+  schedule:
+    - cron: '*/15 * * * *'
 
 permissions:
   contents: read
@@ -70,8 +70,6 @@ jobs:
 
           head -n 80 phpstan-report.txt > phpstan-issue-snippet.txt
           {
-            echo "Commit: ${{ github.sha }}";
-            echo;
             echo "Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
             echo;
             echo "Errors (first lines):";
@@ -83,7 +81,7 @@ jobs:
           } > issue_body.txt
 
           gh issue create \
-            --title "PHPStan errors in commit ${{ github.sha }}" \
+            --title "PHPStan errors (scheduled run)" \
             --body-file issue_body.txt \
             --label "phpstan-error"
 
