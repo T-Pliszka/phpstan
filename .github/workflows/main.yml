@@ -2,7 +2,7 @@ name: PHPStan (daily 7:55 or manual, dedupe issues)
 
 on:
   schedule:
-    - cron: '55 7 * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
