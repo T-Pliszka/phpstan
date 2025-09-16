@@ -102,6 +102,11 @@ function alwaysReturn(): int {
 //    (PHPStan: Function notAFunction() not found)
 notAFunction();
 
+
+notAFunction2();
+
+notAFunction3();
+
 // ❌ Użycie niezdefiniowanej stałej (w PHP traktowane jak string, ale PHPStan flaguje)
 //    (PHPStan: Undefined constant UNDEFINED_CONST)
 echo UNDEFINED_CONST;
