@@ -1,1 +1,1 @@
-A: baza
+A+F: stara zmiana z feature-stary
