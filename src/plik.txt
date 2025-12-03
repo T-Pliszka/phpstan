@@ -1,3 +1,1 @@
-A: baza
-B: ważna linia z main
-C: kolejna zmiana na main
+A+F: stara zmiana z feature-stary
