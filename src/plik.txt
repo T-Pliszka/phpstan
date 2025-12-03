@@ -1,2 +1,3 @@
 A: baza
 B: ważna linia z main
+C: kolejna zmiana na main
